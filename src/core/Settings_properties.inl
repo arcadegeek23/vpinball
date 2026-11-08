@@ -185,6 +185,7 @@ PropString(Player, DecalImage, "Decal image override"s, "Image to use for the ba
 
 // Misc player settings
 PropBool(Player, TouchOverlay, "Touch Overlay"s, "Display an overlay showing touch regions"s, false);
+PropEnum(Player, TouchLayout, "Touch Controls"s, "Auto picks side rail buttons on wide portrait screens (unfolded foldables, tablets) and invisible full screen zones otherwise"s, int, 0, "Auto"s, "Full Screen Zones"s, "Side Rails"s);
 PropBool(Player, EnableCameraModeFlyAround, "Legacy Fly Over Mode"s, "Enable moving camera when using the Tweak menu (legacy, replaced by LiveUI fly mode)"s, false);
 PropBool(Player, DetectHang, "Detect Script Hang"s, ""s, false);
 PropInt(Player, SecurityLevel, "Security Level"s, ""s, 0, 4, DEFAULT_SECURITY_LEVEL);

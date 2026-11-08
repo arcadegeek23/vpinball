@@ -395,9 +395,15 @@ Player::Player(PinTable *const table, const PlayMode playMode, LoadProgress &loa
    if (m_pininput.HasTouchInput() && numberOfTimesToShowTouchMessage != 0) //!! visualize with real buttons or at least the areas?? Add extra buttons?
    {
       g_settingsService.GetAppSettings().SetPlayer_NumberOfTimesToShowTouchMessage(max(numberOfTimesToShowTouchMessage - 1, 0), false);
-      m_liveUI->PushNotification("You can use Touch controls on this display: bottom left area to Start Game, bottom right area to use the Plunger\n"
-                                 "lower left/right for Flippers, upper left/right for Magna buttons, top left for Credits and top right for the Menu"s,
-         12000);
+      if (m_pininput.GetTouchLayout() == InputManager::TouchLayout::Rails)
+         m_liveUI->PushNotification("Touch controls are the buttons beside the table: Coin, Start, Plunger and Flippers.\n"
+                                    "Tap MENU, then Touch Controls, to switch to full screen zones"s,
+            8000);
+      else
+         m_liveUI->PushNotification("You can use Touch controls on this display: bottom left area to Start Game, bottom right area to use the Plunger\n"
+                                    "lower left/right for Flippers, upper left/right for Magna buttons, top left for Credits and top right for the Menu.\n"
+                                    "Change in Menu > Touch Controls"s,
+            12000);
    }
 
    SetPlayState(true);

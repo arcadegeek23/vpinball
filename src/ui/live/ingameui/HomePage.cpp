@@ -40,6 +40,24 @@ void HomePage::BuildPage()
    else
       AddItem(std::make_unique<InGameUIItem>("Point Of View"s, ""s, "settings/pov"s));
 
+   if (isTouch && !m_player->m_vrDevice)
+   {
+      // Cycle Auto -> Full Screen Zones -> Side Rails, showing what Auto currently resolves to
+      static const string modeNames[] = { "Auto"s, "Full Screen Zones"s, "Side Rails"s };
+      const int mode = std::clamp(g_settingsService.GetAppSettings().GetPlayer_TouchLayout(), 0, 2);
+      const bool rails = m_player->m_pininput.GetTouchLayout() == InputManager::TouchLayout::Rails;
+      string label = "Touch Controls: "s + modeNames[mode];
+      if (mode == 0)
+         label += rails ? " (Side Rails)"s : " (Full Screen Zones)"s;
+      AddItem(std::make_unique<InGameUIItem>(label, "Side Rails puts buttons beside the table, best on an unfolded phone in portrait"s,
+         [this, mode]()
+         {
+            g_settingsService.GetAppSettings().SetPlayer_TouchLayout((mode + 1) % 3, false);
+            m_player->m_renderer->InitLayout(); // Re-fit the table to the center column or the full screen
+            RequestRebuild();
+         }));
+   }
+
    AddItem(std::make_unique<InGameUIItem>("Generic Options"s, ""s, "table/general"s));
 
    if (m_player->m_ptable->TournamentModePossible())

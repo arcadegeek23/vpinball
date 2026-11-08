@@ -660,13 +660,18 @@ InputManager::TouchLayout InputManager::GetTouchLayout() const
 {
    if (!m_supportsTouch || m_player == nullptr || m_player->m_playfieldWnd == nullptr || m_player->IsVR())
       return TouchLayout::Classic;
+   const int mode = m_appSettings.GetPlayer_TouchLayout(); // 0 = Auto, 1 = Full screen zones, 2 = Side rails
+   if (mode == 1)
+      return TouchLayout::Classic;
    const int width = m_player->m_playfieldWnd->GetWidth();
    const int height = m_player->m_playfieldWnd->GetHeight();
-   // A playfield is roughly twice as tall as wide, so a portrait screen wider than 0.6 leaves gutters on both sides for the rails.
-   // Rails are drawn in screen space, so they are only used when the view is not rotated.
-   if (height <= 0 || width >= height || static_cast<float>(width) < 0.6f * static_cast<float>(height))
+   // Rails are drawn in screen space, so they are only used when the view is not rotated
+   if (width <= 0 || height <= 0 || m_player->m_ptable->GetViewSetup().GetRotation(width, height) != 0.f)
       return TouchLayout::Classic;
-   if (m_player->m_ptable->GetViewSetup().GetRotation(width, height) != 0.f)
+   if (mode == 2)
+      return TouchLayout::Rails;
+   // Auto: a playfield is roughly twice as tall as wide, so a portrait screen wider than 0.6 leaves gutters on both sides for the rails
+   if (width >= height || static_cast<float>(width) < 0.6f * static_cast<float>(height))
       return TouchLayout::Classic;
    return TouchLayout::Rails;
 }
