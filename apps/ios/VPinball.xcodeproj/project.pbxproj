@@ -525,6 +525,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 10.8.1.1;
 				DEVELOPMENT_ASSET_PATHS = "\"VPinball/Preview Content\"";
+				DEVELOPMENT_TEAM = 7Q2C5LL8VK;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -549,7 +550,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 100801.0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.kyleetter.duopinball";
+				PRODUCT_BUNDLE_IDENTIFIER = com.kyleetter.duopinball;
 				PRODUCT_NAME = "Visual Pinball";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -575,6 +576,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 10.8.1.1;
 				DEVELOPMENT_ASSET_PATHS = "\"VPinball/Preview Content\"";
+				DEVELOPMENT_TEAM = 7Q2C5LL8VK;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -599,7 +601,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 100801.0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.kyleetter.duopinball";
+				PRODUCT_BUNDLE_IDENTIFIER = com.kyleetter.duopinball;
 				PRODUCT_NAME = "Visual Pinball";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
