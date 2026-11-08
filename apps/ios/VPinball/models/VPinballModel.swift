@@ -14,6 +14,8 @@ class VPinballModel: ObservableObject {
     @Published var showSplash = true
     @Published var showMainView = true
     @Published var showHUD = false
+    @Published var showGameMenu = false
+    var restartRequested = false
 
     func showHUD(title: String, status: String) {
         hudTitle = title

@@ -40,6 +40,10 @@ public:
    bool IsEditorBackdropViewMode() const { return m_editorUI.IsOpened() && m_editorUI.IsBackdropEditMode(); }
 
    void OpenInGameUI(const string& page = "homepage"s);
+   // When set (iOS app), opening the in-game home page pauses the game and calls this instead, so the host app can show its
+   // own touch menu. Other pages (and OpenVPXInGameUI) still open the built-in menu.
+   static inline std::function<void()> s_nativeMenuHandler;
+   void OpenVPXInGameUI(const string& page) { HideUI(); m_inGameUI.Open(page); }
    bool IsInGameUIOpened() const { return m_inGameUI.IsOpened(); }
 
    void ToggleFPS() { m_perfUI.NextPerfMode(); }

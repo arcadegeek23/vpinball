@@ -148,6 +148,40 @@ func VPinballPlay(_ pPath: UnsafePointer<CChar>?) -> CInt
 @_silgen_name("VPinballStop")
 func VPinballStop()
 
+// In-game menu
+
+@_silgen_name("VPinballSetNativeMenuEnabled")
+func VPinballSetNativeMenuEnabled(_ enabled: CInt)
+
+@_silgen_name("VPinballGetPlayerState")
+func VPinballGetPlayerState() -> UnsafePointer<CChar>
+
+@_silgen_name("VPinballResumePlay")
+func VPinballResumePlay()
+
+@_silgen_name("VPinballQuitPlay")
+func VPinballQuitPlay()
+
+@_silgen_name("VPinballOpenVPXMenu")
+func VPinballOpenVPXMenu(_ pPage: UnsafePointer<CChar>)
+
+@_silgen_name("VPinballShowServiceButtons")
+func VPinballShowServiceButtons()
+
+@_silgen_name("VPinballSetVolumes")
+func VPinballSetVolumes(_ musicVolume: CInt, _ soundVolume: CInt)
+
+struct PlayerStateData: Codable {
+    var playing: Bool
+    var tableName: String?
+    var hasRules: Bool?
+    var hasOptions: Bool?
+    var musicVolume: Int?
+    var soundVolume: Int?
+    var touchRails: Bool?
+    var servicePage: Bool?
+}
+
 typealias VPinballZipCallback = @convention(c) (CInt, CInt, UnsafePointer<CChar>?) -> Void
 
 @_silgen_name("VPinballZipCreate")

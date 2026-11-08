@@ -709,6 +709,13 @@ void LiveUI::DrawTouchRails(ImDrawList *drawList, float screenWidth, float scree
 
 void LiveUI::OpenInGameUI(const string& page)
 {
+   if (page == "homepage"s && s_nativeMenuHandler && !m_player->IsVR())
+   {
+      HideUI();
+      m_player->SetPlayState(false); // Paused while the host app menu is shown, resumed through VPinballResumePlay
+      s_nativeMenuHandler();
+      return;
+   }
    HideUI();
    m_inGameUI.Open(page);
 }

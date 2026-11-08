@@ -15,7 +15,13 @@ struct VPinballAppView: View {
                 MainView()
                     .opacity(vpinballModel.showMainView ? 1 : 0)
             }
+
+            if vpinballModel.isPlaying && vpinballModel.showGameMenu {
+                GameMenuView()
+                    .transition(.opacity)
+            }
         }
+        .animation(.easeOut(duration: 0.2), value: vpinballModel.showGameMenu)
         .onChange(of: vpinballModel.isPlaying) {
             vpinballModel.showMainView = !vpinballModel.isPlaying
 

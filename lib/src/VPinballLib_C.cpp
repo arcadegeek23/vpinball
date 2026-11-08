@@ -9,6 +9,11 @@
 #include "../include/vpinball/VPinballLib_C.h"
 #include "VPinballLib.h"
 #include "ZipUtils.h"
+#include "core/player.h"
+#include "parts/pintable.h"
+#include "ui/live/LiveUI.h"
+
+#include <nlohmann/json.hpp>
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 {
@@ -159,6 +164,77 @@ VPINBALLAPI VPINBALL_STATUS VPinballPlay(const char* pPath)
 VPINBALLAPI VPINBALL_STATUS VPinballStop()
 {
    return VPinballLib::VPinballLib::Instance().Stop();
+}
+
+VPINBALLAPI void VPinballSetNativeMenuEnabled(int enabled)
+{
+   if (enabled)
+      LiveUI::s_nativeMenuHandler = []()
+      {
+         VPinballLib::CommandData commandData = { "showMenu", "" };
+         VPinballLib::VPinballLib::SendEvent(VPINBALL_EVENT_COMMAND, &commandData);
+      };
+   else
+      LiveUI::s_nativeMenuHandler = nullptr;
+}
+
+VPINBALLAPI const char* VPinballGetPlayerState()
+{
+   thread_local string state;
+   nlohmann::json j;
+   j["playing"] = g_pplayer != nullptr;
+   if (g_pplayer)
+   {
+      const PinTable* const table = g_pplayer->m_ptable;
+      j["tableName"] = table->m_tableName.empty() ? table->m_title : table->m_tableName;
+      j["hasRules"] = !table->m_rules.empty();
+      j["hasOptions"] = !table->GetOptions().empty();
+      j["musicVolume"] = static_cast<int>(g_pplayer->m_backglassVolume * 100.f + 0.5f);
+      j["soundVolume"] = static_cast<int>(g_pplayer->m_playfieldVolume * 100.f + 0.5f);
+      j["touchRails"] = g_pplayer->m_pininput.GetTouchLayout() == InputManager::TouchLayout::Rails;
+      j["servicePage"] = g_pplayer->m_pininput.IsTouchServicePage();
+   }
+   state = j.dump();
+   return state.c_str();
+}
+
+VPINBALLAPI void VPinballResumePlay()
+{
+   if (g_pplayer)
+      g_pplayer->m_liveUI->HideUI(); // Saves settings and resumes play
+}
+
+VPINBALLAPI void VPinballQuitPlay()
+{
+   if (g_pplayer)
+      g_pplayer->m_ptable->QuitPlayer(Player::CS_CLOSE_CAPTURE_SCREENSHOT);
+}
+
+VPINBALLAPI void VPinballOpenVPXMenu(const char* pPage)
+{
+   if (g_pplayer && pPage)
+      g_pplayer->m_liveUI->OpenVPXInGameUI(pPage);
+}
+
+VPINBALLAPI void VPinballShowServiceButtons()
+{
+   if (!g_pplayer)
+      return;
+   g_pplayer->m_pininput.SetTouchServicePage(true);
+   g_pplayer->m_liveUI->HideUI();
+}
+
+VPINBALLAPI void VPinballSetVolumes(int musicVolume, int soundVolume)
+{
+   if (!g_pplayer)
+      return;
+   musicVolume = std::clamp(musicVolume, 0, 100);
+   soundVolume = std::clamp(soundVolume, 0, 100);
+   g_pplayer->m_backglassVolume = static_cast<float>(musicVolume) / 100.f;
+   g_pplayer->m_playfieldVolume = static_cast<float>(soundVolume) / 100.f;
+   g_pplayer->UpdateVolume();
+   g_settingsService.GetAppSettings().SetPlayer_MusicVolume(musicVolume, false);
+   g_settingsService.GetAppSettings().SetPlayer_SoundVolume(soundVolume, false);
 }
 
 VPINBALLAPI VPINBALL_STATUS VPinballZipCreate(const char* pSourcePath, const char* pDestPath, VPinballZipCallback callback)

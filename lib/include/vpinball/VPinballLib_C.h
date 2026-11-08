@@ -78,6 +78,14 @@ VPINBALLAPI const char* VPinballGetPath(VPINBALL_PATH pathType);
 VPINBALLAPI VPINBALL_STATUS VPinballExtractTableScript(const char* pPath);
 VPINBALLAPI VPINBALL_STATUS VPinballPlay(const char* pPath);
 VPINBALLAPI VPINBALL_STATUS VPinballStop();
+// In-game host menu (replaces the built-in home page while a table is played)
+VPINBALLAPI void VPinballSetNativeMenuEnabled(int enabled); // When enabled, the in-game menu button sends a 'showMenu' command event instead of opening the built-in menu
+VPINBALLAPI const char* VPinballGetPlayerState(); // JSON: tableName, hasRules, hasOptions, musicVolume, soundVolume, touchRails, servicePage
+VPINBALLAPI void VPinballResumePlay();
+VPINBALLAPI void VPinballQuitPlay(); // Ends the session (capturing a table thumbnail if none yet), then PLAYER_CLOSED is sent
+VPINBALLAPI void VPinballOpenVPXMenu(const char* pPage); // Opens a built-in menu page, e.g. 'homepage', 'table/rules', 'table/options'
+VPINBALLAPI void VPinballShowServiceButtons(); // Touch rails service page (coin door buttons) and resume
+VPINBALLAPI void VPinballSetVolumes(int musicVolume, int soundVolume); // 0..100, applied live and saved
 
 // Zip
 

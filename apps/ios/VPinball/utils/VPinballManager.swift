@@ -46,12 +46,20 @@ class VPinballManager {
             case .playerClosed:
                 Task { @MainActor in
                     let table = VPinballModel.shared.activeTable
+                    let restart = VPinballModel.shared.restartRequested
+                    VPinballModel.shared.restartRequested = false
+                    VPinballModel.shared.showGameMenu = false
                     VPinballModel.shared.activeTable = nil
                     VPinballModel.shared.isPlaying = false
                     VPinballModel.shared.hideHUD()
                     MainViewModel.shared.setAction(.stopped)
 
-                    if let table {
+                    if let table, restart {
+                        // Restart from the in-game menu: launch the same table again
+                        Task {
+                            await VPinballManager.shared.play(table: table)
+                        }
+                    } else if let table {
                         Task {
                             TableManager.shared.clearLoadedTable(table: table)
                             await TableManager.shared.loadTables()
@@ -87,6 +95,10 @@ class VPinballManager {
                             Task {
                                 await TableManager.shared.loadTables()
                             }
+                        } else if commandData.command == "showMenu" {
+                            VPinballManager.runOnMain {
+                                VPinballModel.shared.showGameMenu = true
+                            }
                         }
                     }
                 }
@@ -98,6 +110,9 @@ class VPinballManager {
                                        highFrequencySpeed: highFrequencySpeed,
                                        durationMs: durationMs)
         })
+
+        // Replace the built-in in-game home menu with GameMenuView
+        VPinballSetNativeMenuEnabled(1)
     }
 
     private static func runOnMain(_ body: @escaping @MainActor () -> Void) {
@@ -195,6 +210,36 @@ class VPinballManager {
             }
         }
         VPinballStop()
+    }
+
+    // In-game menu actions
+
+    func playerState() -> PlayerStateData? {
+        let json = String(cString: VPinballGetPlayerState())
+        return try? JSONDecoder().decode(PlayerStateData.self, from: Data(json.utf8))
+    }
+
+    func resumePlay() {
+        VPinballResumePlay()
+    }
+
+    func quitPlay(restart: Bool = false) {
+        Task { @MainActor in
+            VPinballModel.shared.restartRequested = restart
+        }
+        VPinballQuitPlay()
+    }
+
+    func openVPXMenu(_ page: String) {
+        VPinballOpenVPXMenu(page.cstring)
+    }
+
+    func showServiceButtons() {
+        VPinballShowServiceButtons()
+    }
+
+    func setVolumes(music: Int, sound: Int) {
+        VPinballSetVolumes(CInt(music), CInt(sound))
     }
 
     func resetIni() {
