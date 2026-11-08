@@ -1157,7 +1157,16 @@ void Renderer::InitLayout(const float xpixoff, const float ypixoff)
    #elif defined(ENABLE_DX9)
    constexpr bool stereo = false;
    #endif
-   viewSetup.ComputeMVP(m_table, GetDisplayAspectRatio(), stereo, m_mvp, vec3(m_cam.x, m_cam.y, m_cam.z), m_inc, xpixoff / (float)GetDisplayWidth(), ypixoff / (float)GetDisplayHeight());
+   // With the touch rails layout (wide portrait touch screens like an unfolded iPhone Duo), the side rails hold the touch buttons:
+   // lay the table out for the center column between them, then squeeze the projection horizontally into that column
+   const float columnScale = (g_pplayer->m_pininput.GetTouchLayout() == InputManager::TouchLayout::Rails) ? (float)(100 - 2 * InputManager::TOUCH_RAIL_WIDTH_PCT) / 100.f : 1.f;
+   viewSetup.ComputeMVP(m_table, GetDisplayAspectRatio() * columnScale, stereo, m_mvp, vec3(m_cam.x, m_cam.y, m_cam.z), m_inc, xpixoff / (float)GetDisplayWidth(), ypixoff / (float)GetDisplayHeight());
+   if (columnScale != 1.f)
+   {
+      const Matrix3D squeeze = Matrix3D::MatrixScale(columnScale, 1.f, 1.f);
+      for (unsigned int eye = 0; eye < m_mvp.m_nEyes; eye++)
+         m_mvp.SetProj(eye, m_mvp.GetProj(eye) * squeeze);
+   }
    for (unsigned int eye = 0; eye < m_mvp.m_nEyes; eye++)
       m_isStaticPrepassDirty |= !(m_mvp.GetView(eye) == m_initialMVP.GetView(eye)) || !(m_mvp.GetProj(eye) == m_initialMVP.GetProj(eye));
    m_initialMVP = m_mvp;

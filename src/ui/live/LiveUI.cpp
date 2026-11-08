@@ -590,7 +590,9 @@ void LiveUI::UpdateTouchUI()
    if (m_player->m_vrDevice)
       return;
 
-   if (!m_showTouchOverlay)
+   // The rails layout is always drawn since its buttons are the controls; the classic invisible zones only when the overlay is requested
+   const InputManager::TouchLayout layout = m_player->m_pininput.GetTouchLayout();
+   if (layout == InputManager::TouchLayout::Classic && !m_showTouchOverlay)
       return;
 
    const ImGuiIO &io = ImGui::GetIO();
@@ -608,21 +610,102 @@ void LiveUI::UpdateTouchUI()
 
    ImGui::Begin("Touch Controls", nullptr, window_flags);
    ImDrawList *drawList = ImGui::GetWindowDrawList();
-   for (const auto& region : m_pininput->GetTouchState())
+   if (layout == InputManager::TouchLayout::Rails)
+      DrawTouchRails(drawList, screenWidth, screenHeight);
+   else
    {
-      const RECT& rect = region.region;
+      for (const auto &region : m_player->m_pininput.GetTouchState())
+      {
+         if (region.layout != layout)
+            continue;
+         const RECT &rect = region.region;
 
-      const ImVec2 topLeft((float)rect.left * screenWidth / 100.0f, (float)rect.top * screenHeight / 100.0f);
-      const ImVec2 bottomRight((float)rect.right * screenWidth / 100.0f, (float)rect.bottom * screenHeight / 100.0f);
+         const ImVec2 topLeft((float)rect.left * screenWidth / 100.0f, (float)rect.top * screenHeight / 100.0f);
+         const ImVec2 bottomRight((float)rect.right * screenWidth / 100.0f, (float)rect.bottom * screenHeight / 100.0f);
 
-      constexpr ImColor fillColor(255, 255, 255, 5);
-      drawList->AddRectFilled(topLeft, bottomRight, fillColor);
+         constexpr ImColor fillColor(255, 255, 255, 5);
+         drawList->AddRectFilled(topLeft, bottomRight, fillColor);
 
-      constexpr ImColor borderColor(255, 255, 255, 20);
-      drawList->AddRect(topLeft, bottomRight, borderColor, 0.0f, ImDrawFlags_RoundAll, 2.0f);
+         constexpr ImColor borderColor(255, 255, 255, 20);
+         drawList->AddRect(topLeft, bottomRight, borderColor, 0.0f, ImDrawFlags_RoundAll, 2.0f);
+      }
    }
    ImGui::End();
    ImGui::PopStyleVar(2);
+}
+
+void LiveUI::DrawTouchRails(ImDrawList *drawList, float screenWidth, float screenHeight) const
+{
+   const InputManager &input = m_player->m_pininput;
+   auto toScreen = [&](const RECT &rect)
+   {
+      return std::pair(ImVec2((float)rect.left * screenWidth / 100.0f, (float)rect.top * screenHeight / 100.0f),
+         ImVec2((float)rect.right * screenWidth / 100.0f, (float)rect.bottom * screenHeight / 100.0f));
+   };
+
+   // Dark rail panels frame the playfield and keep the buttons readable over whatever the table renders underneath
+   float railWidth = 0.f;
+   for (const auto &region : input.GetTouchState())
+      if (region.layout == InputManager::TouchLayout::Rails && region.region.left == 0)
+         railWidth = std::max(railWidth, (float)region.region.right * screenWidth / 100.0f);
+   constexpr ImColor railColor(8, 8, 12, 225);
+   constexpr ImColor railEdgeColor(255, 255, 255, 28);
+   drawList->AddRectFilled(ImVec2(0.f, 0.f), ImVec2(railWidth, screenHeight), railColor);
+   drawList->AddRectFilled(ImVec2(screenWidth - railWidth, 0.f), ImVec2(screenWidth, screenHeight), railColor);
+   drawList->AddLine(ImVec2(railWidth, 0.f), ImVec2(railWidth, screenHeight), railEdgeColor, 2.f);
+   drawList->AddLine(ImVec2(screenWidth - railWidth, 0.f), ImVec2(screenWidth - railWidth, screenHeight), railEdgeColor, 2.f);
+
+   const float pad = railWidth * 0.08f;
+   const float fontSize = railWidth * 0.17f;
+   for (const auto &region : input.GetTouchState())
+   {
+      if (region.layout != InputManager::TouchLayout::Rails || region.label == nullptr)
+         continue;
+      auto [topLeft, bottomRight] = toScreen(region.region);
+      topLeft.x += pad;
+      topLeft.y += pad;
+      bottomRight.x -= pad;
+      bottomRight.y -= pad;
+      const float w = bottomRight.x - topLeft.x;
+      const float h = bottomRight.y - topLeft.y;
+      const ImVec2 center((topLeft.x + bottomRight.x) * 0.5f, (topLeft.y + bottomRight.y) * 0.5f);
+
+      const unsigned int id = region.actionId;
+      const bool isFlipper = id == input.GetLeftFlipperActionId() || id == input.GetRightFlipperActionId();
+      ImU32 r = 150, g = 160, b = 175; // Menu, nudge: neutral
+      if (isFlipper) { r = 255; g = 170; b = 40; } // Amber
+      else if (id == input.GetStartActionId()) { r = 70; g = 210; b = 110; } // Green
+      else if (id == input.GetAddCreditActionId(0)) { r = 245; g = 210; b = 70; } // Gold
+      else if (id == input.GetLaunchBallActionId()) { r = 235; g = 70; b = 70; } // Red
+
+      const bool pressed = input.IsTouchRegionPressed(region);
+      const float rounding = std::min(w, h) * 0.22f;
+      drawList->AddRectFilled(topLeft, bottomRight, IM_COL32(r, g, b, pressed ? 190 : 45), rounding);
+      drawList->AddRect(topLeft, bottomRight, IM_COL32(r, g, b, pressed ? 255 : 200), rounding, ImDrawFlags_None, pressed ? 4.f : 2.5f);
+
+      const ImU32 textColor = pressed ? IM_COL32(15, 15, 20, 255) : IM_COL32(r, g, b, 255);
+      const ImVec2 textSize = m_overlayBoldFont->CalcTextSizeA(fontSize, FLT_MAX, 0.f, region.label);
+      ImVec2 textPos(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f);
+      if (isFlipper)
+      {
+         // Arrow pointing to the flipper's side, above the label
+         const float dir = region.region.left == 0 ? -1.f : 1.f;
+         const float s = w * 0.28f;
+         const ImVec2 c(center.x, center.y - s * 0.7f);
+         drawList->AddTriangleFilled(ImVec2(c.x + dir * s * 0.6f, c.y), ImVec2(c.x - dir * s * 0.6f, c.y - s * 0.8f), ImVec2(c.x - dir * s * 0.6f, c.y + s * 0.8f), textColor);
+         textPos.y = c.y + s * 1.1f;
+      }
+      else if (id == input.GetLaunchBallActionId())
+      {
+         // Plunger rod: pull down and release
+         const float rodH = h * 0.22f;
+         const ImVec2 top(center.x, center.y - h * 0.3f);
+         drawList->AddLine(top, ImVec2(top.x, top.y + rodH), textColor, std::max(3.f, w * 0.05f));
+         drawList->AddRectFilled(ImVec2(top.x - w * 0.16f, top.y + rodH), ImVec2(top.x + w * 0.16f, top.y + rodH + w * 0.1f), textColor, w * 0.03f);
+         textPos.y = center.y + h * 0.12f;
+      }
+      drawList->AddText(m_overlayBoldFont, fontSize, textPos, textColor, region.label);
+   }
 }
 
 void LiveUI::OpenInGameUI(const string& page)

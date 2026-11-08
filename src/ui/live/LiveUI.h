@@ -90,6 +90,7 @@ private:
    // Touch UI overlay
    void UpdateTouchUI();
    bool m_showTouchOverlay;
+   void DrawTouchRails(ImDrawList *drawList, float screenWidth, float screenHeight) const;
 
    // Emulated plumb overlay
    PlumbOverlay m_plumbOverlay;

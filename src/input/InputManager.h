@@ -111,7 +111,7 @@ public:
    // Input events are discarded during the first game frames, except while this is set (to detect all buttons held at startup)
    void SetAcceptStartupEvents(bool accept) { m_acceptStartupEvents = accept; }
    void PushAxisEvent(uint16_t deviceId, uint16_t axisId, uint64_t timestampNs, float position);
-   void PushTouchEvent(float relativeX, float relativeY, uint64_t timestampNs, bool isPressed);
+   void PushTouchEvent(uint64_t fingerId, float relativeX, float relativeY, uint64_t timestampNs, bool isPressed);
 
    void AddAxisListener(std::function<void()> listener) { m_axisListeners.push_back(std::move(listener)); }
    void ClearAxisListeners() { m_axisListeners.clear(); }
@@ -119,14 +119,23 @@ public:
    void RegisterOnUpdate(InputAction* action);
    void UnregisterOnUpdate(InputAction* action);
 
+   // Classic: invisible zones covering the whole screen (phones).
+   // Rails: drawn buttons in side rails around the playfield, used when the playfield window is a
+   // wide portrait (unfolded foldables like iPhone Duo, tablets) where the playfield leaves side gutters.
+   enum class TouchLayout { Classic, Rails };
+   static constexpr int TOUCH_RAIL_WIDTH_PCT = 16; // Width of each side rail, in % of screen width
    struct TouchRegionDef
    {
-      RECT region;
+      RECT region; // left, top, right, bottom in % of screen
       unsigned int actionId;
       int directStateSlot;
+      TouchLayout layout;
+      const char* label; // Displayed on the Rails overlay (nullptr for regions that share another region's button)
    };
    bool HasTouchInput() const { return m_supportsTouch; }
    const vector<TouchRegionDef>& GetTouchState() const { return m_touchRegionMap; }
+   TouchLayout GetTouchLayout() const;
+   bool IsTouchRegionPressed(const TouchRegionDef& region) const;
 
    void StartButtonCapture();
    const vector<ButtonMapping>& GetButtonCapture() const { return m_buttonCapture; }
@@ -281,6 +290,7 @@ private:
 
    bool m_supportsTouch;
    vector<TouchRegionDef> m_touchRegionMap;
+   ankerl::unordered_dense::map<uint64_t, vector<size_t>> m_fingerRegions; // Regions pressed by each active finger, released when that finger lifts
 
    vector<std::unique_ptr<InputHandler>> m_inputHandlers;
    class SDLInputHandler* m_sdlHandler = nullptr;

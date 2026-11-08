@@ -53,8 +53,10 @@ InputManager::InputManager(Player* player, Settings& appSettings)
    }
    if (touchDevices)
       SDL_free(touchDevices);
-   auto addTouchRegion = [this](const RECT& region, unsigned int actionId) { m_touchRegionMap.emplace_back(region, actionId, m_inputActions[actionId]->NewDirectStateSlot()); };
+   auto addTouchRegion = [this](const RECT& region, unsigned int actionId, TouchLayout layout = TouchLayout::Classic, const char* label = nullptr)
+   { m_touchRegionMap.push_back({ region, actionId, m_inputActions[actionId]->NewDirectStateSlot(), layout, label }); };
    // RECT definition is left, top, right, bottom in % of screen
+   // Classic layout: invisible zones covering the whole screen (phones)
    addTouchRegion(RECT { 0, 0, 50, 10 }, GetAddCreditActionId(0));
    addTouchRegion(RECT { 50, 0, 100, 10 }, GetOpenInGameUIActionId());
    addTouchRegion(RECT { 0, 10, 50, 30 }, GetLeftMagnaActionId());
@@ -68,6 +70,21 @@ InputManager::InputManager(Player* player, Settings& appSettings)
    addTouchRegion(RECT { 70, 60, 100, 90 }, GetStagedRightFlipperActionId());
    addTouchRegion(RECT { 0, 90, 30, 100 }, GetStartActionId());
    addTouchRegion(RECT { 70, 90, 100, 100 }, GetLaunchBallActionId());
+   // Rails layout: drawn buttons in the side gutters left by the playfield on wide portrait screens (unfolded iPhone Duo).
+   // Flippers take the lower half of each rail where thumbs rest; the playfield in the center is left untouched.
+   constexpr TouchLayout R = TouchLayout::Rails;
+   constexpr int W = TOUCH_RAIL_WIDTH_PCT;
+   constexpr int X = 100 - TOUCH_RAIL_WIDTH_PCT;
+   addTouchRegion(RECT { 0, 0, W, 12 }, GetAddCreditActionId(0), R, "COIN");
+   addTouchRegion(RECT { 0, 12, W, 26 }, GetStartActionId(), R, "START");
+   addTouchRegion(RECT { 0, 26, W, 42 }, GetLeftNudgeActionId(), R, "NUDGE");
+   addTouchRegion(RECT { 0, 50, W, 100 }, GetLeftFlipperActionId(), R, "FLIP");
+   addTouchRegion(RECT { 0, 50, W, 100 }, GetStagedLeftFlipperActionId(), R);
+   addTouchRegion(RECT { X, 0, 100, 12 }, GetOpenInGameUIActionId(), R, "MENU");
+   addTouchRegion(RECT { X, 12, 100, 26 }, GetRightNudgeActionId(), R, "NUDGE");
+   addTouchRegion(RECT { X, 26, 100, 46 }, GetLaunchBallActionId(), R, "PLUNGER");
+   addTouchRegion(RECT { X, 50, 100, 100 }, GetRightFlipperActionId(), R, "FLIP");
+   addTouchRegion(RECT { X, 50, 100, 100 }, GetStagedRightFlipperActionId(), R);
 
    m_rumbleMode = m_appSettings.GetPlayer_RumbleMode();
    m_rumbleFlipperContact = m_appSettings.GetPlayer_RumbleFlipperContact();
@@ -639,7 +656,27 @@ void InputManager::PushAxisEvent(uint16_t deviceId, uint16_t axisId, uint64_t ti
    }
 }
 
-void InputManager::PushTouchEvent(float relativeX, float relativeY, uint64_t timestampNs, bool isPressed)
+InputManager::TouchLayout InputManager::GetTouchLayout() const
+{
+   if (!m_supportsTouch || m_player == nullptr || m_player->m_playfieldWnd == nullptr || m_player->IsVR())
+      return TouchLayout::Classic;
+   const int width = m_player->m_playfieldWnd->GetWidth();
+   const int height = m_player->m_playfieldWnd->GetHeight();
+   // A playfield is roughly twice as tall as wide, so a portrait screen wider than 0.6 leaves gutters on both sides for the rails.
+   // Rails are drawn in screen space, so they are only used when the view is not rotated.
+   if (height <= 0 || width >= height || static_cast<float>(width) < 0.6f * static_cast<float>(height))
+      return TouchLayout::Classic;
+   if (m_player->m_ptable->GetViewSetup().GetRotation(width, height) != 0.f)
+      return TouchLayout::Classic;
+   return TouchLayout::Rails;
+}
+
+bool InputManager::IsTouchRegionPressed(const TouchRegionDef& region) const
+{
+   return m_inputActions[region.actionId]->GetDirectState(region.directStateSlot);
+}
+
+void InputManager::PushTouchEvent(uint64_t fingerId, float relativeX, float relativeY, uint64_t timestampNs, bool isPressed)
 {
    // Discard input events until the player has been running for a few frames to avoid triggering actions during table startup
    // (during initial table load, the loading UI is displayed and interactive, so events must flow)
@@ -649,17 +686,55 @@ void InputManager::PushTouchEvent(float relativeX, float relativeY, uint64_t tim
    if (m_player->IsVR())
       return;
 
-   POINT point;
-   point.x = (int)((float)m_player->m_playfieldWnd->GetWidth() * relativeX);
-   point.y = (int)((float)m_player->m_playfieldWnd->GetHeight() * relativeY);
-   for (const auto& region : m_touchRegionMap)
+   auto setRegion = [this](size_t index, bool pressed)
    {
-      if (const bool wasPressed = m_inputActions[region.actionId]->GetDirectState(region.directStateSlot); wasPressed == isPressed)
+      const TouchRegionDef& region = m_touchRegionMap[index];
+      if (m_inputActions[region.actionId]->GetDirectState(region.directStateSlot) != pressed)
+         m_inputActions[region.actionId]->SetDirectState(region.directStateSlot, pressed);
+   };
+
+   if (!isPressed)
+   {
+      // Release what this finger pressed, wherever it is lifted (a thumb often slides off a flipper button before lifting),
+      // unless another finger still holds the same region
+      const auto it = m_fingerRegions.find(fingerId);
+      if (it == m_fingerRegions.end())
+         return;
+      const vector<size_t> released = std::move(it->second);
+      m_fingerRegions.erase(it);
+      for (const size_t index : released)
+      {
+         bool heldElsewhere = false;
+         for (const auto& [otherFinger, regions] : m_fingerRegions)
+            heldElsewhere |= std::find(regions.begin(), regions.end(), index) != regions.end();
+         if (!heldElsewhere)
+            setRegion(index, false);
+      }
+      return;
+   }
+
+   const int width = m_player->m_playfieldWnd->GetWidth();
+   const int height = m_player->m_playfieldWnd->GetHeight();
+   const TouchLayout layout = GetTouchLayout();
+   const bool rotated = layout == TouchLayout::Classic && fmodf(m_player->m_ptable->GetViewSetup().mViewportRotation, 360.0f) != 0.f;
+   POINT point;
+   point.x = static_cast<int>(static_cast<float>(width) * relativeX);
+   point.y = static_cast<int>(static_cast<float>(height) * relativeY);
+   vector<size_t>& pressedByFinger = m_fingerRegions[fingerId];
+   for (size_t i = 0; i < m_touchRegionMap.size(); i++)
+   {
+      const TouchRegionDef& region = m_touchRegionMap[i];
+      if (region.layout != layout)
+      {
+         // Layout changed (device folded/unfolded): release anything still held from the other layout
+         setRegion(i, false);
          continue;
-      if (!Intersect(region.region, m_player->m_playfieldWnd->GetWidth(), m_player->m_playfieldWnd->GetHeight(), point,
-             fmodf(m_player->m_ptable->GetViewSetup().mViewportRotation, 360.0f) != 0.f))
+      }
+      if (!Intersect(region.region, width, height, point, rotated))
          continue;
-      m_inputActions[region.actionId]->SetDirectState(region.directStateSlot, isPressed);
+      setRegion(i, true);
+      if (std::find(pressedByFinger.begin(), pressedByFinger.end(), i) == pressedByFinger.end())
+         pressedByFinger.push_back(i);
    }
 }
 

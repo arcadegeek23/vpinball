@@ -112,8 +112,9 @@ public:
 
       case SDL_EVENT_FINGER_DOWN:
       case SDL_EVENT_FINGER_UP:
+      case SDL_EVENT_FINGER_CANCELED: // e.g. a system gesture or notification takes over the touch: treat as a release
          if (e.tfinger.windowID == SDL_GetWindowID(g_pplayer->m_playfieldWnd->GetCore()))
-            m_pininput.PushTouchEvent(e.tfinger.x, e.tfinger.y, e.tfinger.timestamp, e.type == SDL_EVENT_FINGER_DOWN);
+            m_pininput.PushTouchEvent(static_cast<uint64_t>(e.tfinger.fingerID), e.tfinger.x, e.tfinger.y, e.tfinger.timestamp, e.type == SDL_EVENT_FINGER_DOWN);
          break;
 
       default: break;
