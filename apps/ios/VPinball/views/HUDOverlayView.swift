@@ -62,6 +62,7 @@ struct GameMenuView: View {
                 .ignoresSafeArea()
                 .onTapGesture { resume() }
 
+            GeometryReader { geo in
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     header
@@ -80,7 +81,7 @@ struct GameMenuView: View {
                         }
                         if state?.touchRails == true {
                             row("wrench.and.screwdriver.fill", .yellow, "Machine Setup",
-                                "Swaps the side buttons for the coin door buttons, to use the machine's own menu on the DMD: game settings, audits and its volume") {
+                                "Coin door buttons for the machine's own settings and volume") {
                                 close()
                                 manager.showServiceButtons()
                             }
@@ -131,14 +132,16 @@ struct GameMenuView: View {
                         }
                     }
                 }
-                .padding(24)
-                .frame(maxWidth: 480)
+                .padding(20)
+                // Explicit width: a fixed width (not maxWidth) guarantees long explanations wrap instead of
+                // widening the panel past the screen edges.
+                .frame(width: min(480, geo.size.width - 32), alignment: .leading)
                 .glassPanel(cornerRadius: 30)
-                .padding(.horizontal, 16)
                 .padding(.vertical, 40)
                 .frame(maxWidth: .infinity)
             }
             .scrollBounceBehavior(.basedOnSize)
+            }
         }
         .environment(\.colorScheme, .dark)
         .onAppear(perform: refresh)
@@ -218,9 +221,10 @@ struct GameMenuView: View {
                     Text(subtitle)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.tertiary)
@@ -240,11 +244,14 @@ struct GameMenuView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.body.weight(.semibold))
                     Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Text("\(Int(value.wrappedValue))%")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             Slider(value: value, in: 0 ... 100, step: 1) { editing in
                 if !editing { applyVolumes() }
