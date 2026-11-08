@@ -85,6 +85,19 @@ InputManager::InputManager(Player* player, Settings& appSettings)
    addTouchRegion(RECT { X, 26, 100, 46 }, GetLaunchBallActionId(), R, "PLUNGER");
    addTouchRegion(RECT { X, 50, 100, 100 }, GetRightFlipperActionId(), R, "FLIP");
    addTouchRegion(RECT { X, 50, 100, 100 }, GetStagedRightFlipperActionId(), R);
+   // Rails service page: the WPC/WPC-95 style coin door buttons, the machine draws its menu on the DMD. Down/Up also set the
+   // machine volume when the coin door is closed
+   auto addServiceRegion = [this, &addTouchRegion](const RECT& region, unsigned int actionId, const char* label)
+   {
+      addTouchRegion(region, actionId, TouchLayout::Rails, label);
+      m_touchRegionMap.back().servicePage = true;
+   };
+   addServiceRegion(RECT { 0, 0, W, 20 }, GetServiceActionId(0), "ESCAPE");
+   addServiceRegion(RECT { 0, 20, W, 45 }, GetCoinDoorActionId(), "DOOR");
+   addServiceRegion(RECT { 0, 50, W, 100 }, GetServiceActionId(1), "DOWN -");
+   addServiceRegion(RECT { X, 0, 100, 20 }, GetServiceActionId(3), "ENTER");
+   addServiceRegion(RECT { X, 20, 100, 45 }, GetTouchServicePageActionId(), "DONE");
+   addServiceRegion(RECT { X, 50, 100, 100 }, GetServiceActionId(2), "UP +");
 
    m_rumbleMode = m_appSettings.GetPlayer_RumbleMode();
    m_rumbleFlipperContact = m_appSettings.GetPlayer_RumbleFlipperContact();
@@ -676,6 +689,20 @@ InputManager::TouchLayout InputManager::GetTouchLayout() const
    return TouchLayout::Rails;
 }
 
+void InputManager::SetTouchServicePage(bool service)
+{
+   if (m_touchServicePage == service)
+      return;
+   m_touchServicePage = service;
+   // Release whatever the other page still holds
+   for (const TouchRegionDef& region : m_touchRegionMap)
+      if (region.layout == TouchLayout::Rails && region.servicePage != service && m_inputActions[region.actionId]->GetDirectState(region.directStateSlot))
+         m_inputActions[region.actionId]->SetDirectState(region.directStateSlot, false);
+   m_fingerRegions.clear();
+   if (m_player && m_player->m_liveUI)
+      m_player->m_liveUI->PushNotification(service ? "Service buttons: ENTER opens the machine menu on the DMD, DONE returns to play"s : "Play buttons"s, 3000);
+}
+
 bool InputManager::IsTouchRegionPressed(const TouchRegionDef& region) const
 {
    return m_inputActions[region.actionId]->GetDirectState(region.directStateSlot);
@@ -729,9 +756,9 @@ void InputManager::PushTouchEvent(uint64_t fingerId, float relativeX, float rela
    for (size_t i = 0; i < m_touchRegionMap.size(); i++)
    {
       const TouchRegionDef& region = m_touchRegionMap[i];
-      if (region.layout != layout)
+      if (!IsTouchRegionActive(region, layout))
       {
-         // Layout changed (device folded/unfolded): release anything still held from the other layout
+         // Layout or rails page changed (device folded/unfolded): release anything still held from the other one
          setRegion(i, false);
          continue;
       }
@@ -952,6 +979,13 @@ void InputManager::CreateInputActions()
    m_slamTiltActionId = addKeyAction("SlamTilt"s, "Slam Tilt"s, SDL_SCANCODE_HOME);
    m_coinDoorActionId = addKeyAction("CoinDoor"s, "Coin Door"s, SDL_SCANCODE_END);
    m_resetActionId = addKeyAction("Reset"s, "Reset"s, SDL_SCANCODE_F3);
+   auto touchServicePage = AddAction(std::make_unique<InputAction>(this, "TouchServicePage"s, "Touch: Service Buttons"s, ""s,
+      [this](const InputAction&, bool, bool isPressed)
+      {
+         if (isPressed)
+            SetTouchServicePage(!m_touchServicePage);
+      }));
+   m_touchServicePageActionId = touchServicePage->GetActionId();
    static constexpr SDL_Scancode serviceKeys[8]
       = { SDL_SCANCODE_7, SDL_SCANCODE_8, SDL_SCANCODE_9, SDL_SCANCODE_0, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_PAGEUP, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN };
    for (int i = 0; i < 8; ++i)

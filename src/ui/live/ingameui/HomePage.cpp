@@ -49,6 +49,13 @@ void HomePage::BuildPage()
       string label = "Touch Controls: "s + modeNames[mode];
       if (mode == 0)
          label += rails ? " (Side Rails)"s : " (Full Screen Zones)"s;
+      if (rails)
+         AddItem(std::make_unique<InGameUIItem>("Machine Setup (Service Buttons)"s, "Swap the side rails for the coin door buttons to use the machine's own menu on the DMD (adjustments, audits, volume)"s,
+            [this]()
+            {
+               m_player->m_pininput.SetTouchServicePage(true);
+               m_player->m_liveUI->HideUI();
+            }));
       AddItem(std::make_unique<InGameUIItem>(label, "Side Rails puts buttons beside the table, best on an unfolded phone in portrait"s,
          [this, mode]()
          {

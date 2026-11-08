@@ -243,7 +243,8 @@ void Textbox::Render(const unsigned int renderMask)
    const bool is_dmd = m_d.m_isDMD || StrFindNoCase(m_d.m_text, "DMD"s) != string::npos; //!! second part is VP10.0 legacy
    if (isStaticOnly
       || !m_d.m_visible
-      || (!is_dmd && m_texture == nullptr))
+      || (!is_dmd && m_texture == nullptr)
+      || (is_dmd && m_renderer->IsBackdropDmdHidden())) // Touch rails layout shows the DMD in its own band right above the table
       return;
 
    constexpr float mult  = (float)(1.0 / EDITOR_BG_WIDTH);

@@ -383,6 +383,8 @@ void Renderer::SetTable(PinTable *const table)
 
 Renderer::~Renderer()
 {
+   if (m_defaultDmdTex != nullptr)
+      g_pplayer->m_pluginAPI.getAPI().DeleteTexture(m_defaultDmdTex);
    m_gpu_profiler.Shutdown();
    m_ballMeshBuffer = nullptr;
    #ifdef DEBUG_BALL_SPIN
@@ -1101,12 +1103,15 @@ void Renderer::DrawBackground()
 
    const PinTable* const ptable = g_pplayer->m_ptable;
    const ViewSetupID bgSet = g_pplayer->m_liveUI->IsEditorBackdropViewMode() ? BG_DESKTOP : ptable->GetViewMode();
-   Texture * const pin = ptable->GetDecalsEnabled() ? ptable->GetImage(ptable->m_BG_image[bgSet]) : nullptr;
+   Texture * pin = ptable->GetDecalsEnabled() ? ptable->GetImage(ptable->m_BG_image[bgSet]) : nullptr;
+   if (pin == nullptr && m_backdropBandActive)
+      pin = m_backdropBandFallback;
    m_renderDevice->ResetRenderState();
    m_renderDevice->SetRenderState(RenderState::CULLMODE, RenderState::CULL_CCW);
    if (pin)
    {
-      m_renderDevice->Clear(clearType::ZBUFFER, 0);
+      // The backdrop image only covers its band: clear the rest of the screen
+      m_renderDevice->Clear(m_backdropBandActive ? (clearType::TARGET | clearType::ZBUFFER) : clearType::ZBUFFER, 0);
       m_renderDevice->SetRenderState(RenderState::ZWRITEENABLE, RenderState::RS_FALSE);
       m_renderDevice->SetRenderState(RenderState::ZENABLE, RenderState::RS_FALSE);
       m_renderDevice->SetRenderState(RenderState::ALPHABLENDENABLE, RenderState::RS_FALSE);
@@ -1158,18 +1163,173 @@ void Renderer::InitLayout(const float xpixoff, const float ypixoff)
    constexpr bool stereo = false;
    #endif
    // With the touch rails layout (wide portrait touch screens like an unfolded iPhone Duo), the side rails hold the touch buttons:
-   // lay the table out for the center column between them, then squeeze the projection horizontally into that column
-   const float columnScale = (g_pplayer->m_pininput.GetTouchLayout() == InputManager::TouchLayout::Rails) ? (float)(100 - 2 * InputManager::TOUCH_RAIL_WIDTH_PCT) / 100.f : 1.f;
+   // lay the table out for the center column between them, with the DMD and backglass above it
+   const bool touchRails = g_pplayer->m_pininput.GetTouchLayout() == InputManager::TouchLayout::Rails;
+   const float columnScale = touchRails ? (float)(100 - 2 * InputManager::TOUCH_RAIL_WIDTH_PCT) / 100.f : 1.f;
    viewSetup.ComputeMVP(m_table, GetDisplayAspectRatio() * columnScale, stereo, m_mvp, vec3(m_cam.x, m_cam.y, m_cam.z), m_inc, xpixoff / (float)GetDisplayWidth(), ypixoff / (float)GetDisplayHeight());
-   if (columnScale != 1.f)
-   {
-      const Matrix3D squeeze = Matrix3D::MatrixScale(columnScale, 1.f, 1.f);
-      for (unsigned int eye = 0; eye < m_mvp.m_nEyes; eye++)
-         m_mvp.SetProj(eye, m_mvp.GetProj(eye) * squeeze);
-   }
+   if (touchRails)
+      FitTableToTouchRailsColumn(columnScale);
+   else if (m_touchRailsOutputsApplied)
+      ApplyTouchRailsOutputs(false, 0, 0, 0, 0, 0, 0, 0, 0);
+   if (!touchRails)
+      m_backdropBandActive = false;
    for (unsigned int eye = 0; eye < m_mvp.m_nEyes; eye++)
       m_isStaticPrepassDirty |= !(m_mvp.GetView(eye) == m_initialMVP.GetView(eye)) || !(m_mvp.GetProj(eye) == m_initialMVP.GetProj(eye));
    m_initialMVP = m_mvp;
+}
+
+void Renderer::FitTableToTouchRailsColumn(float columnScale)
+{
+   // Squeeze the projection (computed for the column aspect ratio) horizontally into the center column
+   const Matrix3D squeeze = Matrix3D::MatrixScale(columnScale, 1.f, 1.f);
+   for (unsigned int eye = 0; eye < m_mvp.m_nEyes; eye++)
+      m_mvp.SetProj(eye, m_mvp.GetProj(eye) * squeeze);
+
+   // Bounds of the table (playfield and glass corners) in normalized device coordinates
+   const Matrix3D& mvp = m_mvp.GetModelViewProj(0);
+   float minX = FLT_MAX, minY = FLT_MAX, maxX = -FLT_MAX, maxY = -FLT_MAX;
+   for (const float x : { m_table->m_left, m_table->m_right })
+      for (const bool top : { true, false })
+         for (const float z : { 0.f, top ? m_table->m_glassTopHeight : m_table->m_glassBottomHeight })
+         {
+            const Vertex3Ds p = mvp * Vertex3Ds(x, top ? m_table->m_top : m_table->m_bottom, z);
+            if (!std::isfinite(p.x) || !std::isfinite(p.y))
+               continue;
+            minX = min(minX, p.x);
+            maxX = max(maxX, p.x);
+            minY = min(minY, p.y);
+            maxY = max(maxY, p.y);
+         }
+   if (maxX <= minX || maxY <= minY)
+      return;
+
+   // Layout in window logical units (top-down): DMD band (4:1, column wide) and, if the table has a directb2s, a backglass band above it
+   const VPX::Window* const wnd = m_renderDevice->m_outputWnd[0];
+   const float W = static_cast<float>(wnd->GetWidth()), H = static_cast<float>(wnd->GetHeight());
+   const float colW = W * columnScale, colX = (W - colW) * 0.5f;
+   const float dmdH = colW / 4.f;
+   bool hasBackglass = false;
+   if (const std::filesystem::path dir = m_table->m_filename.parent_path(); !dir.empty())
+   {
+      std::error_code ec;
+      for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
+         if (lowerCase(entry.path().extension().string()) == ".directb2s")
+         {
+            hasBackglass = true;
+            break;
+         }
+   }
+   // Fit the table first (uniform scale, anchored at the bottom of the screen) as large as possible: it may use the full width,
+   // its wide bottom passing under the see-through rails, leaving room above for the DMD and at least a small backglass band
+   const float minBgH = H * 0.16f;
+   const float targetTop = 1.f - 2.f * (dmdH + minBgH) / H; // NDC, y up
+   const float s = min(2.f / (maxX - minX), (targetTop + 1.f) / (maxY - minY));
+   Matrix3D fit = Matrix3D::MatrixIdentity();
+   fit._11 = s;
+   fit._22 = s;
+   fit._41 = -s * (minX + maxX) * 0.5f;
+   fit._42 = -1.f - s * minY;
+   for (unsigned int eye = 0; eye < m_mvp.m_nEyes; eye++)
+      m_mvp.SetProj(eye, m_mvp.GetProj(eye) * fit);
+
+   // The DMD sits right on top of the table, the backglass right on top of the DMD
+   const float tableTop = (1.f - (s * maxY + fit._42)) * 0.5f * H; // Logical units from the top of the window
+   const float dmdY = max(minBgH, tableTop - dmdH);
+   // The desktop backdrop space (EDITOR_BG_WIDTH x EDITOR_BG_HEIGHT) is authored for widescreen desktops: 16:9 band, as large as fits above the DMD
+   float bgW = colW, bgH = colW * 9.f / 16.f;
+   if (bgH > dmdY)
+   {
+      bgH = dmdY;
+      bgW = bgH * 16.f / 9.f;
+   }
+   const float bgX = (W - bgW) * 0.5f;
+   const float bgY = dmdY - bgH;
+   // Backdrop band, as an NDC transform of the full screen backdrop mapping
+   m_backdropBandActive = bgH > 0.f;
+   m_backdropBand = vec4(bgW / W, bgH / H, (bgX + bgW * 0.5f) / W * 2.f - 1.f, 1.f - (bgY + bgH * 0.5f) / H * 2.f);
+   m_backdropBandFallback = nullptr;
+   if (m_table->m_BG_image[m_table->GetViewMode()].empty())
+   {
+      // No desktop backdrop image: use the table's backglass art if it has one (often provided for the VR backglass)
+      for (const char* key : { "backglass", "backdrop" })
+      {
+         for (Texture* const image : m_table->GetImageList())
+            if (lowerCase(image->GetName()).find(key) != string::npos && lowerCase(image->GetName()).find("off") == string::npos)
+            {
+               m_backdropBandFallback = image;
+               break;
+            }
+         if (m_backdropBandFallback)
+            break;
+      }
+   }
+   ApplyTouchRailsOutputs(true, static_cast<int>(colX), static_cast<int>(dmdY), static_cast<int>(colW), static_cast<int>(dmdH),
+      static_cast<int>(bgX), static_cast<int>(bgY), static_cast<int>(bgW), hasBackglass ? static_cast<int>(bgH) : 0);
+}
+
+void Renderer::ApplyTouchRailsOutputs(bool rails, int dmdX, int dmdY, int dmdW, int dmdH, int bgX, int bgY, int bgW, int bgH)
+{
+   const Settings& settings = m_table->GetSettings();
+   auto place = [&settings](VPX::RenderOutput& output, VPXWindowId id, bool show, int x, int y, int w, int h)
+   {
+      if (!show)
+      {
+         // Back to the configured output (recreating an embedded one so it takes its configured position again)
+         output.SetMode(settings, VPX::RenderOutput::OM_DISABLED);
+         output.SetMode(settings, static_cast<VPX::RenderOutput::OutputMode>(settings.GetWindow_Mode(id)));
+         return;
+      }
+      if (output.GetMode() != VPX::RenderOutput::OM_EMBEDDED)
+         output.SetMode(settings, VPX::RenderOutput::OM_EMBEDDED);
+      if (output.GetMode() != VPX::RenderOutput::OM_EMBEDDED || output.GetEmbeddedWindow() == nullptr)
+         return;
+      output.SetPos(x, y);
+      output.SetWidth(w);
+      output.SetHeight(h);
+   };
+   place(g_pplayer->m_scoreViewOutput, VPXWindowId::VPXWINDOW_ScoreView, rails, dmdX, dmdY, dmdW, dmdH);
+   place(g_pplayer->m_backglassOutput, VPXWindowId::VPXWINDOW_Backglass, rails && bgH > 0, bgX, bgY, bgW, bgH);
+   m_touchRailsOutputsApplied = rails;
+}
+
+bool Renderer::RenderDefaultDmd(VPXRenderContext2D& context)
+{
+   const PinballPlugin::ResURIResolver::DisplayState dmd = g_pplayer->m_resURIResolver.GetDisplayState(PinballPlugin::ResURIResolver::DefaultDmdUri);
+   if (dmd.state.frame == nullptr || dmd.source == nullptr || dmd.source->width <= 0 || dmd.source->height <= 0)
+      return false;
+   if (m_defaultDmdTex == nullptr || dmd.state.frameId != m_defaultDmdFrameId || *dmd.source != m_defaultDmdSrc)
+   {
+      switch (dmd.source->frameFormat)
+      {
+      case CTLPI_DISPLAY_FORMAT_LUM32F: g_pplayer->m_pluginAPI.getAPI().UpdateTexture(&m_defaultDmdTex, dmd.source->width, dmd.source->height, VPXTextureFormat::VPXTEXFMT_BW32F, dmd.state.frame); break;
+      case CTLPI_DISPLAY_FORMAT_SRGB888: g_pplayer->m_pluginAPI.getAPI().UpdateTexture(&m_defaultDmdTex, dmd.source->width, dmd.source->height, VPXTextureFormat::VPXTEXFMT_sRGB8, dmd.state.frame); break;
+      case CTLPI_DISPLAY_FORMAT_SRGB565: g_pplayer->m_pluginAPI.getAPI().UpdateTexture(&m_defaultDmdTex, dmd.source->width, dmd.source->height, VPXTextureFormat::VPXTEXFMT_sRGB565, dmd.state.frame); break;
+      default: return false;
+      }
+      m_defaultDmdSrc = *dmd.source;
+      m_defaultDmdFrameId = dmd.state.frameId;
+   }
+   VPXDisplayRenderStyle style = VPXDisplayRenderStyle::VPXDMDStyle_Plasma;
+   switch (dmd.source->hardware & CTLPI_DISPLAY_HARDWARE_FAMILY_MASK)
+   {
+   case CTLPI_DISPLAY_HARDWARE_RED_LED: style = VPXDisplayRenderStyle::VPXDMDStyle_RedLED; break;
+   case CTLPI_DISPLAY_HARDWARE_RGB_LED: style = VPXDisplayRenderStyle::VPXDMDStyle_GenLED; break;
+   case CTLPI_DISPLAY_HARDWARE_CRT_DISPLAY: style = VPXDisplayRenderStyle::VPXDMDStyle_CRT; break;
+   case CTLPI_DISPLAY_HARDWARE_LCD_DISPLAY: style = VPXDisplayRenderStyle::VPXDMDStyle_Pixelated; break;
+   default: break;
+   }
+   // Fit the DMD (keeping its aspect ratio) centered in the output
+   const float ar = static_cast<float>(dmd.source->width) / static_cast<float>(dmd.source->height);
+   float w = context.srcWidth, h = context.srcWidth / ar;
+   if (h > context.srcHeight)
+   {
+      h = context.srcHeight;
+      w = h * ar;
+   }
+   context.DrawDisplay(&context, style, nullptr, 1.f, 1.f, 1.f, 0.f, 0.f, 0.f, 1.f, 1.f, 0.f, 0.f, 0.f, // No glass
+      m_defaultDmdTex, 1.f, 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, 0.f, 0.f, //
+      (context.srcWidth - w) * 0.5f, (context.srcHeight - h) * 0.5f, w, h);
+   return true;
 }
 
 void Renderer::ApplyViewJitter(const float xpixoff, const float ypixoff)
@@ -1239,7 +1399,10 @@ Vertex2D Renderer::BackdropToClip(const Vertex2D& pos) const
    else
    {
       // Otherwise, defaults to a fixed full screen ortho camera that scales to EDITOR_BG_WIDTH x EDITOR_BG_HEIGHT
-      return Vertex2D(2.0f * pos.x / (float)EDITOR_BG_WIDTH - 1.0f, 1.0f - 2.0f * pos.y / (float)EDITOR_BG_HEIGHT);
+      const Vertex2D clip(2.0f * pos.x / (float)EDITOR_BG_WIDTH - 1.0f, 1.0f - 2.0f * pos.y / (float)EDITOR_BG_HEIGHT);
+      if (m_backdropBandActive)
+         return Vertex2D(clip.x * m_backdropBand.x + m_backdropBand.z, clip.y * m_backdropBand.y + m_backdropBand.w);
+      return clip;
    }
 }
 
@@ -1507,6 +1670,13 @@ void Renderer::UpdateDesktopBackdropShaderMatrix(bool basic, bool light, bool fl
       matWorldViewProj[0]._41 = -1.0f;
       matWorldViewProj[0]._22 = -2.0f / (float)m_renderDevice->GetCurrentRenderTarget()->GetHeight();
       matWorldViewProj[0]._42 = 1.0f;
+      if (m_backdropBandActive)
+      {
+         Matrix3D band = Matrix3D::MatrixScale(m_backdropBand.x, m_backdropBand.y, 1.f);
+         band._41 = m_backdropBand.z;
+         band._42 = m_backdropBand.w;
+         matWorldViewProj[0] = matWorldViewProj[0] * band;
+      }
    }
    const int eyes = m_renderDevice->GetCurrentRenderTarget()->m_nLayers;
    if (eyes > 1)
@@ -4226,6 +4396,9 @@ void Renderer::RenderAncillaryWindow(VPXWindowId window, const VPX::RenderOutput
       if (rendered)
          break;
    }
+   // Built-in DMD when no plugin draws the score view (e.g. no directb2s or PUP pack): mobile single screen layouts rely on it
+   if (!rendered && window == VPXWindowId::VPXWINDOW_ScoreView && output.GetMode() == VPX::RenderOutput::OM_EMBEDDED)
+      rendered = RenderDefaultDmd(context);
    m_ancillaryWndRendered[window] = rendered;
 
    // Area used by the content, turned like it onto the output (to fit the output to it)

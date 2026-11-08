@@ -332,6 +332,23 @@ private:
    void ClearEmbeddedAncillaryWindow(VPXWindowId window, const VPX::RenderOutput& output, RenderTarget* embedRT);
    void DrawEmbeddedQuad(RenderTarget* outputRT, int x, int y, int w, int h, float r, float g, float b);
    void RenderAncillaryWindow(VPXWindowId window, const VPX::RenderOutput& output, RenderTarget* embedRT, const vector<AncillaryRendererDef>& ancillaryWndRenderers);
+   // Touch rails layout (wide portrait touch screens): the table is fitted to the bottom of the center column, with the
+   // DMD (score view) right above it and the backglass above the DMD, both embedded in the playfield window
+   void FitTableToTouchRailsColumn(float columnScale);
+   void ApplyTouchRailsOutputs(bool rails, int dmdX, int dmdY, int dmdW, int dmdH, int bgX, int bgY, int bgW, int bgH);
+   bool m_touchRailsOutputsApplied = false;
+   bool m_backdropBandActive = false; // Touch rails: the desktop backdrop (backglass art, reels, segment displays, text) is drawn in a band above the DMD
+   Texture* m_backdropBandFallback = nullptr; // Backglass art for the band when the desktop backdrop has no image (e.g. the table's VR backglass image)
+   vec4 m_backdropBand; // NDC transform of that band: x' = x * band.x + band.z, y' = y * band.y + band.w
+public:
+   // Touch rails: backdrop DMD elements are hidden as the DMD is shown in its own band, right above the table
+   bool IsBackdropDmdHidden() const { return m_touchRailsOutputsApplied && m_ancillaryWndRendered[VPXWindowId::VPXWINDOW_ScoreView]; }
+private:
+   // Built-in score view fallback when no plugin renders it: draws the controller's default DMD
+   bool RenderDefaultDmd(VPXRenderContext2D& context);
+   VPXTexture m_defaultDmdTex = nullptr;
+   DisplaySrcId m_defaultDmdSrc {};
+   unsigned int m_defaultDmdFrameId = 0;
    std::unique_ptr<RenderTarget> m_ancillaryWndHdrRT[VPXWindowId::VPXWINDOW_Topper + 1];
    bool m_ancillaryWndRendered[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // Whether a renderer claimed the window on the last frame
    bool m_ancillaryWndAdjusted[VPXWindowId::VPXWINDOW_Topper + 1] = {}; // Whether the window's display settings page was open on the last frame

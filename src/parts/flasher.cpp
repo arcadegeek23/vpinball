@@ -1002,6 +1002,10 @@ void Flasher::Render(const unsigned int renderMask)
    if (!m_d.m_isVisible || m_meshBuffer == nullptr || isReflectionPass)
       return;
 
+   // Touch rails layout shows the DMD in its own band right above the table: hide backdrop DMDs that would duplicate it
+   if (m_desktopBackdrop && m_d.m_renderMode == FlasherData::DMD && m_renderer->IsBackdropDmdHidden())
+      return;
+
    // Don't render if LightSequence in play and state is off
    if (m_lockedByLS && !m_inPlayState)
       return;

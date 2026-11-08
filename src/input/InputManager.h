@@ -131,11 +131,17 @@ public:
       int directStateSlot;
       TouchLayout layout;
       const char* label; // Displayed on the Rails overlay (nullptr for regions that share another region's button)
+      bool servicePage = false; // Rails only: shown on the service page (coin door buttons) instead of the play page
    };
    bool HasTouchInput() const { return m_supportsTouch; }
    const vector<TouchRegionDef>& GetTouchState() const { return m_touchRegionMap; }
    TouchLayout GetTouchLayout() const;
    bool IsTouchRegionPressed(const TouchRegionDef& region) const;
+   bool IsTouchRegionActive(const TouchRegionDef& region, TouchLayout layout) const { return region.layout == layout && (layout != TouchLayout::Rails || region.servicePage == m_touchServicePage); }
+   // Rails service page: coin door buttons (Escape, -, +, Enter, Coin Door) to use the machine's own setup menu shown on the DMD
+   bool IsTouchServicePage() const { return m_touchServicePage; }
+   void SetTouchServicePage(bool service);
+   unsigned int GetTouchServicePageActionId() const { return m_touchServicePageActionId; }
 
    void StartButtonCapture();
    const vector<ButtonMapping>& GetButtonCapture() const { return m_buttonCapture; }
@@ -240,6 +246,8 @@ private:
    unsigned int m_coinDoorActionId;
    unsigned int m_resetActionId;
    unsigned int m_serviceActionId[8];
+   unsigned int m_touchServicePageActionId;
+   bool m_touchServicePage = false;
    unsigned int m_vrViewCenterActionId;
    unsigned int m_vrViewUpActionId;
    unsigned int m_vrViewDownActionId;

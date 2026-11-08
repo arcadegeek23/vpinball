@@ -643,23 +643,17 @@ void LiveUI::DrawTouchRails(ImDrawList *drawList, float screenWidth, float scree
          ImVec2((float)rect.right * screenWidth / 100.0f, (float)rect.bottom * screenHeight / 100.0f));
    };
 
-   // Dark rail panels frame the playfield and keep the buttons readable over whatever the table renders underneath
+   // No rail panels: the buttons float over the screen edges, see-through until pressed
    float railWidth = 0.f;
    for (const auto &region : input.GetTouchState())
       if (region.layout == InputManager::TouchLayout::Rails && region.region.left == 0)
          railWidth = std::max(railWidth, (float)region.region.right * screenWidth / 100.0f);
-   constexpr ImColor railColor(8, 8, 12, 225);
-   constexpr ImColor railEdgeColor(255, 255, 255, 28);
-   drawList->AddRectFilled(ImVec2(0.f, 0.f), ImVec2(railWidth, screenHeight), railColor);
-   drawList->AddRectFilled(ImVec2(screenWidth - railWidth, 0.f), ImVec2(screenWidth, screenHeight), railColor);
-   drawList->AddLine(ImVec2(railWidth, 0.f), ImVec2(railWidth, screenHeight), railEdgeColor, 2.f);
-   drawList->AddLine(ImVec2(screenWidth - railWidth, 0.f), ImVec2(screenWidth - railWidth, screenHeight), railEdgeColor, 2.f);
 
    const float pad = railWidth * 0.08f;
    const float fontSize = railWidth * 0.17f;
    for (const auto &region : input.GetTouchState())
    {
-      if (region.layout != InputManager::TouchLayout::Rails || region.label == nullptr)
+      if (!input.IsTouchRegionActive(region, InputManager::TouchLayout::Rails) || region.label == nullptr)
          continue;
       auto [topLeft, bottomRight] = toScreen(region.region);
       topLeft.x += pad;
@@ -677,13 +671,18 @@ void LiveUI::DrawTouchRails(ImDrawList *drawList, float screenWidth, float scree
       else if (id == input.GetStartActionId()) { r = 70; g = 210; b = 110; } // Green
       else if (id == input.GetAddCreditActionId(0)) { r = 245; g = 210; b = 70; } // Gold
       else if (id == input.GetLaunchBallActionId()) { r = 235; g = 70; b = 70; } // Red
+      else if (id == input.GetServiceActionId(3)) { r = 70; g = 210; b = 110; } // Enter: green
+      else if (id == input.GetServiceActionId(0)) { r = 235; g = 70; b = 70; } // Escape: red
+      else if (id == input.GetServiceActionId(1) || id == input.GetServiceActionId(2)) { r = 90; g = 170; b = 255; } // Down/Up: blue
+      else if (id == input.GetCoinDoorActionId()) { r = 245; g = 210; b = 70; } // Gold
 
       const bool pressed = input.IsTouchRegionPressed(region);
       const float rounding = std::min(w, h) * 0.22f;
-      drawList->AddRectFilled(topLeft, bottomRight, IM_COL32(r, g, b, pressed ? 190 : 45), rounding);
-      drawList->AddRect(topLeft, bottomRight, IM_COL32(r, g, b, pressed ? 255 : 200), rounding, ImDrawFlags_None, pressed ? 4.f : 2.5f);
+      if (pressed)
+         drawList->AddRectFilled(topLeft, bottomRight, IM_COL32(r, g, b, 70), rounding);
+      drawList->AddRect(topLeft, bottomRight, IM_COL32(r, g, b, pressed ? 200 : 40), rounding, ImDrawFlags_None, pressed ? 3.f : 1.5f);
 
-      const ImU32 textColor = pressed ? IM_COL32(15, 15, 20, 255) : IM_COL32(r, g, b, 255);
+      const ImU32 textColor = pressed ? IM_COL32(255, 255, 255, 220) : IM_COL32(r, g, b, 75);
       const ImVec2 textSize = m_overlayBoldFont->CalcTextSizeA(fontSize, FLT_MAX, 0.f, region.label);
       ImVec2 textPos(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f);
       if (isFlipper)
