@@ -650,7 +650,7 @@ void LiveUI::DrawTouchRails(ImDrawList *drawList, float screenWidth, float scree
          railWidth = std::max(railWidth, (float)region.region.right * screenWidth / 100.0f);
 
    const float pad = railWidth * 0.08f;
-   const float fontSize = railWidth * 0.17f;
+   const float fontSize = std::min(railWidth * 0.17f, screenHeight * 0.03f); // Rails are wider on landscape screens, but buttons shorter
    for (const auto &region : input.GetTouchState())
    {
       if (!input.IsTouchRegionActive(region, InputManager::TouchLayout::Rails) || region.label == nullptr)
@@ -678,11 +678,11 @@ void LiveUI::DrawTouchRails(ImDrawList *drawList, float screenWidth, float scree
 
       const bool pressed = input.IsTouchRegionPressed(region);
       const float rounding = std::min(w, h) * 0.22f;
-      if (pressed)
-         drawList->AddRectFilled(topLeft, bottomRight, IM_COL32(r, g, b, 70), rounding);
-      drawList->AddRect(topLeft, bottomRight, IM_COL32(r, g, b, pressed ? 200 : 40), rounding, ImDrawFlags_None, pressed ? 3.f : 1.5f);
+      // Dark see-through backing so the buttons read over any backglass wallpaper
+      drawList->AddRectFilled(topLeft, bottomRight, pressed ? IM_COL32(r, g, b, 90) : IM_COL32(0, 0, 0, 70), rounding);
+      drawList->AddRect(topLeft, bottomRight, IM_COL32(r, g, b, pressed ? 220 : 110), rounding, ImDrawFlags_None, pressed ? 3.f : 2.f);
 
-      const ImU32 textColor = pressed ? IM_COL32(255, 255, 255, 220) : IM_COL32(r, g, b, 75);
+      const ImU32 textColor = pressed ? IM_COL32(255, 255, 255, 220) : IM_COL32(r, g, b, 170);
       const ImVec2 textSize = m_overlayBoldFont->CalcTextSizeA(fontSize, FLT_MAX, 0.f, region.label);
       ImVec2 textPos(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f);
       if (isFlipper)

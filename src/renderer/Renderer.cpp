@@ -12,6 +12,8 @@
 #include "parts/ball.h"
 #include "parts/Collection.h"
 #include "parts/light.h"
+#include "parts/textbox.h"
+#include "parts/dispreel.h"
 #include "parts/pintable.h"
 #include "physics/cabinet/NudgeHandler.h"
 #include "renderer/Anaglyph.h"
@@ -1163,7 +1165,7 @@ void Renderer::InitLayout(const float xpixoff, const float ypixoff)
    constexpr bool stereo = false;
    #endif
    // With the touch rails layout (wide portrait touch screens like an unfolded iPhone Duo), the side rails hold the touch buttons:
-   // lay the table out for the center column between them, with the DMD and backglass above it
+   // lay the table out for the center column between them, with the DMD above it
    const bool touchRails = g_pplayer->m_pininput.GetTouchLayout() == InputManager::TouchLayout::Rails;
    const float columnScale = touchRails ? (float)(100 - 2 * InputManager::TOUCH_RAIL_WIDTH_PCT) / 100.f : 1.f;
    viewSetup.ComputeMVP(m_table, GetDisplayAspectRatio() * columnScale, stereo, m_mvp, vec3(m_cam.x, m_cam.y, m_cam.z), m_inc, xpixoff / (float)GetDisplayWidth(), ypixoff / (float)GetDisplayHeight());
@@ -1185,43 +1187,75 @@ void Renderer::FitTableToTouchRailsColumn(float columnScale)
    for (unsigned int eye = 0; eye < m_mvp.m_nEyes; eye++)
       m_mvp.SetProj(eye, m_mvp.GetProj(eye) * squeeze);
 
-   // Bounds of the table (playfield and glass corners) in normalized device coordinates
+   // Bounds of the table in normalized device coordinates: the playfield, up to the glass at the back so that tall parts there
+   // (ramps, toys) stay below the DMD, but only the playfield level at the front, where the cabinet may leave the screen
    const Matrix3D& mvp = m_mvp.GetModelViewProj(0);
    float minX = FLT_MAX, minY = FLT_MAX, maxX = -FLT_MAX, maxY = -FLT_MAX;
    for (const float x : { m_table->m_left, m_table->m_right })
-      for (const bool top : { true, false })
-         for (const float z : { 0.f, top ? m_table->m_glassTopHeight : m_table->m_glassBottomHeight })
-         {
-            const Vertex3Ds p = mvp * Vertex3Ds(x, top ? m_table->m_top : m_table->m_bottom, z);
-            if (!std::isfinite(p.x) || !std::isfinite(p.y))
-               continue;
-            minX = min(minX, p.x);
-            maxX = max(maxX, p.x);
-            minY = min(minY, p.y);
-            maxY = max(maxY, p.y);
-         }
+      for (const float z : { 0.f, m_table->m_glassTopHeight })
+      {
+         const Vertex3Ds p = mvp * Vertex3Ds(x, z == 0.f ? m_table->m_bottom : m_table->m_top, z);
+         if (!std::isfinite(p.x) || !std::isfinite(p.y))
+            continue;
+         minX = min(minX, p.x);
+         maxX = max(maxX, p.x);
+         minY = min(minY, p.y);
+         maxY = max(maxY, p.y);
+      }
    if (maxX <= minX || maxY <= minY)
       return;
 
-   // Layout in window logical units (top-down): DMD band (4:1, column wide) and, if the table has a directb2s, a backglass band above it
-   const VPX::Window* const wnd = m_renderDevice->m_outputWnd[0];
-   const float W = static_cast<float>(wnd->GetWidth()), H = static_cast<float>(wnd->GetHeight());
-   const float colW = W * columnScale, colX = (W - colW) * 0.5f;
-   const float dmdH = colW / 4.f;
-   bool hasBackglass = false;
+   // Backglass art: the table's desktop backdrop image, or else its backglass art if it has one (often provided for the VR backglass)
+   Texture* art = m_table->GetImage(m_table->m_BG_image[m_table->GetViewMode()]);
+   m_backdropBandFallback = nullptr;
+   if (art == nullptr)
+   {
+      for (const char* key : { "backglass", "backdrop" })
+      {
+         for (Texture* const image : m_table->GetImageList())
+            if (lowerCase(image->GetName()).find(key) != string::npos && lowerCase(image->GetName()).find("off") == string::npos)
+            {
+               m_backdropBandFallback = image;
+               break;
+            }
+         if (m_backdropBandFallback)
+            break;
+      }
+      art = m_backdropBandFallback;
+   }
+
+   bool hasDirectB2S = false;
    if (const std::filesystem::path dir = m_table->m_filename.parent_path(); !dir.empty())
    {
       std::error_code ec;
       for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
          if (lowerCase(entry.path().extension().string()) == ".directb2s")
          {
-            hasBackglass = true;
+            hasDirectB2S = true;
             break;
          }
    }
-   // Fit the table first (uniform scale, anchored at the bottom of the screen) as large as possible: it may use the full width,
-   // its wide bottom passing under the see-through rails, leaving room above for the DMD and at least a small backglass band
-   const float minBgH = H * 0.16f;
+
+   // Tables scoring on reels or text boxes draw their score on the backdrop, and a directb2s is composed over the scene:
+   // these need a backglass band that the table does not cover. Everything else gets the backglass as a wallpaper behind the table.
+   bool scoresOnBackdrop = false;
+   for (IEditable* const part : m_table->GetParts())
+      if ((part->GetItemType() == eItemDispReel && static_cast<DispReel*>(part)->m_d.m_visible)
+         || (part->GetItemType() == eItemTextbox && static_cast<Textbox*>(part)->m_d.m_visible && !static_cast<Textbox*>(part)->m_d.m_isDMD))
+      {
+         scoresOnBackdrop = true;
+         break;
+      }
+   const bool useBand = scoresOnBackdrop || (art == nullptr && hasDirectB2S);
+
+   // Layout in window logical units (top-down): the DMD (4:1, column wide), then the table, anchored at the bottom of the screen and
+   // as large as possible. It may use the full width, its wide bottom passing under the see-through buttons.
+   const VPX::Window* const wnd = m_renderDevice->m_outputWnd[0];
+   const float W = static_cast<float>(wnd->GetWidth()), H = static_cast<float>(wnd->GetHeight());
+   const float colW = W * columnScale;
+   // 4:1 DMD, column wide, but kept short on landscape screens so that the table keeps most of the height
+   const float dmdH = min(colW / 4.f, H * 0.14f), dmdW = dmdH * 4.f, dmdX = (W - dmdW) * 0.5f;
+   const float minBgH = useBand ? H * 0.16f : 0.f;
    const float targetTop = 1.f - 2.f * (dmdH + minBgH) / H; // NDC, y up
    const float s = min(2.f / (maxX - minX), (targetTop + 1.f) / (maxY - minY));
    Matrix3D fit = Matrix3D::MatrixIdentity();
@@ -1232,7 +1266,23 @@ void Renderer::FitTableToTouchRailsColumn(float columnScale)
    for (unsigned int eye = 0; eye < m_mvp.m_nEyes; eye++)
       m_mvp.SetProj(eye, m_mvp.GetProj(eye) * fit);
 
-   // The DMD sits right on top of the table, the backglass right on top of the DMD
+   if (!useBand)
+   {
+      // Wallpaper: the DMD at the very top, the art covering the whole screen (keeping its aspect ratio, cropped as needed, top aligned)
+      m_backdropBandActive = art != nullptr;
+      if (art != nullptr)
+      {
+         const unsigned int artW = art->m_width, artH = art->m_height;
+         const float artAspect = (artW > 0 && artH > 0) ? static_cast<float>(artW) / static_cast<float>(artH) : 4.f / 3.f;
+         const float scaleX = max(1.f, artAspect * H / W);
+         const float scaleY = max(1.f, W / (artAspect * H));
+         m_backdropBand = vec4(scaleX, scaleY, 0.f, 1.f - scaleY);
+      }
+      ApplyTouchRailsOutputs(true, static_cast<int>(dmdX), 0, static_cast<int>(dmdW), static_cast<int>(dmdH), 0, 0, 0, 0);
+      return;
+   }
+
+   // Backglass band: the DMD sits right on top of the table, the backglass right on top of the DMD
    const float tableTop = (1.f - (s * maxY + fit._42)) * 0.5f * H; // Logical units from the top of the window
    const float dmdY = max(minBgH, tableTop - dmdH);
    // The desktop backdrop space (EDITOR_BG_WIDTH x EDITOR_BG_HEIGHT) is authored for widescreen desktops: 16:9 band, as large as fits above the DMD
@@ -1247,24 +1297,8 @@ void Renderer::FitTableToTouchRailsColumn(float columnScale)
    // Backdrop band, as an NDC transform of the full screen backdrop mapping
    m_backdropBandActive = bgH > 0.f;
    m_backdropBand = vec4(bgW / W, bgH / H, (bgX + bgW * 0.5f) / W * 2.f - 1.f, 1.f - (bgY + bgH * 0.5f) / H * 2.f);
-   m_backdropBandFallback = nullptr;
-   if (m_table->m_BG_image[m_table->GetViewMode()].empty())
-   {
-      // No desktop backdrop image: use the table's backglass art if it has one (often provided for the VR backglass)
-      for (const char* key : { "backglass", "backdrop" })
-      {
-         for (Texture* const image : m_table->GetImageList())
-            if (lowerCase(image->GetName()).find(key) != string::npos && lowerCase(image->GetName()).find("off") == string::npos)
-            {
-               m_backdropBandFallback = image;
-               break;
-            }
-         if (m_backdropBandFallback)
-            break;
-      }
-   }
-   ApplyTouchRailsOutputs(true, static_cast<int>(colX), static_cast<int>(dmdY), static_cast<int>(colW), static_cast<int>(dmdH),
-      static_cast<int>(bgX), static_cast<int>(bgY), static_cast<int>(bgW), hasBackglass ? static_cast<int>(bgH) : 0);
+   ApplyTouchRailsOutputs(true, static_cast<int>(dmdX), static_cast<int>(dmdY), static_cast<int>(dmdW), static_cast<int>(dmdH),
+      static_cast<int>(bgX), static_cast<int>(bgY), static_cast<int>(bgW), hasDirectB2S ? static_cast<int>(bgH) : 0);
 }
 
 void Renderer::ApplyTouchRailsOutputs(bool rails, int dmdX, int dmdY, int dmdW, int dmdH, int bgX, int bgY, int bgW, int bgH)

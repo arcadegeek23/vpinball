@@ -683,8 +683,9 @@ InputManager::TouchLayout InputManager::GetTouchLayout() const
       return TouchLayout::Classic;
    if (mode == 2)
       return TouchLayout::Rails;
-   // Auto: a playfield is roughly twice as tall as wide, so a portrait screen wider than 0.6 leaves gutters on both sides for the rails
-   if (width >= height || static_cast<float>(width) < 0.6f * static_cast<float>(height))
+   // Auto: a playfield is roughly twice as tall as wide, so a landscape screen, or a portrait one wider than 0.6, leaves gutters
+   // on both sides for the rails
+   if (width < height && static_cast<float>(width) < 0.6f * static_cast<float>(height))
       return TouchLayout::Classic;
    return TouchLayout::Rails;
 }
